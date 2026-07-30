@@ -1,0 +1,16 @@
+{
+  "name": "Lucky Dice",
+  "short_name": "LuckyDice",
+  "description": "Multiplayer 3D physics dice roller",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b2b10",
+  "theme_color": "#0b2b10",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
