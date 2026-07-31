@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useMemo } from 'react';
+import { Suspense, useRef, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Environment, OrbitControls, ContactShadows, Text, useGLTF, useTexture } from '@react-three/drei';
