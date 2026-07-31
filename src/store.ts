@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import Cookies from 'js-cookie';
 import Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
+import type { Toast } from './components/ui/toast';
+
+let peerInitialized = false;
 
 interface RollData {
     id: number;
@@ -22,6 +25,8 @@ interface CursorData {
 
 interface GameState {
     gamerTag: string;
+    displayName: string;
+    setDisplayName: (name: string) => void;
     peerId: string | null;
     isHost: boolean;
     connections: DataConnection[];
@@ -32,6 +37,7 @@ interface GameState {
     rollEvent: RollData | null;
 
     cursors: Record<string, CursorData>;
+    playerNames: Record<string, string>;
     lockedDice: number[];
 
     betAmount: number;
@@ -40,6 +46,7 @@ interface GameState {
     setBetAmount: (amount: number) => void;
     setBetMultiplier: (multiplier: number) => void;
     updateScore: (peerId: string, tag: string, delta: number) => void;
+    resetScores: () => void;
 
     boardModel: string;
     setBoardModel: (model: string) => void;
@@ -51,6 +58,8 @@ interface GameState {
 
     lockEnabled: boolean;
     toggleLockFeature: () => void;
+    showBettingPanel: boolean;
+    toggleBettingPanel: () => void;
 
     initializeSession: () => void;
     initializeNetwork: (roomId: string | null) => void;
@@ -64,10 +73,16 @@ interface GameState {
     updateCursor: (id: string, data: CursorData) => void;
     removeCursor: (id: string) => void;
     broadcastCursor: (x: number, z: number) => void;
+    kickPlayer: (peerId: string) => void;
+
+    toasts: Toast[];
+    pushToast: (toast: Omit<Toast, 'id'>) => void;
+    dismissToast: (id: string) => void;
 }
 
 export const useStore = create<GameState>((set, get) => ({
     gamerTag: '',
+    displayName: Cookies.get('displayName') || '',
     peerId: null,
     isHost: false,
     connections: [],
@@ -80,11 +95,19 @@ export const useStore = create<GameState>((set, get) => ({
     isRolling: false,
     rollEvent: null,
     cursors: {},
+    playerNames: {},
     lockedDice: [],
     betAmount: 100,
     betMultiplier: 1,
     scores: {},
     lockEnabled: Cookies.get('lockEnabled') !== 'false',
+    showBettingPanel: false,
+    toasts: [],
+
+    setDisplayName: (name) => {
+        Cookies.set('displayName', name, { expires: 365, sameSite: 'strict' });
+        set({ displayName: name });
+    },
 
     initializeSession: () => {
         let tag = Cookies.get('gamerTag');
@@ -97,6 +120,11 @@ export const useStore = create<GameState>((set, get) => ({
 
     setBetAmount: (amount) => set({ betAmount: amount }),
     setBetMultiplier: (multiplier) => set({ betMultiplier: multiplier }),
+
+    resetScores: () => {
+        set({ scores: {} });
+        get().connections.forEach((conn) => conn.send({ type: 'RESET_SCORES' }));
+    },
 
     updateScore: (peerId, tag, delta) => {
         set((state) => ({
@@ -124,6 +152,12 @@ export const useStore = create<GameState>((set, get) => ({
     setDiceModel: (model) => {
         Cookies.set('diceModel', model, { expires: 365, sameSite: 'strict' });
         set({ diceModel: model });
+    },
+
+    toggleBettingPanel: () => {
+        const next = !get().showBettingPanel;
+        Cookies.set('showBettingPanel', String(next), { expires: 365, sameSite: 'strict' });
+        set({ showBettingPanel: next });
     },
 
     toggleLockFeature: () => {
@@ -154,6 +188,21 @@ export const useStore = create<GameState>((set, get) => ({
         get().connections.forEach((conn) => conn.send(data));
     },
 
+    kickPlayer: (pid) => {
+        const conn = get().connections.find(c => c.peer === pid);
+        conn?.send({ type: 'KICKED' });
+        conn?.close();
+    },
+
+    pushToast: (toast) => {
+        const id = `${Date.now()}-${Math.random()}`;
+        set(state => ({ toasts: [...state.toasts, { ...toast, id }] }));
+    },
+
+    dismissToast: (id) => {
+        set(state => ({ toasts: state.toasts.filter(t => t.id !== id) }));
+    },
+
     updateCursor: (id, data) => {
         set((state) => ({ cursors: { ...state.cursors, [id]: data } }));
     },
@@ -167,7 +216,7 @@ export const useStore = create<GameState>((set, get) => ({
     },
 
     broadcastCursor: (x, z) => {
-        const data = { type: 'CURSOR', id: get().peerId, tag: get().gamerTag, x, z };
+        const data = { type: 'CURSOR', id: get().peerId, tag: get().displayName || get().gamerTag, x, z };
         get().connections.forEach((conn) => conn.send(data));
     },
 
@@ -186,22 +235,38 @@ export const useStore = create<GameState>((set, get) => ({
     },
 
     initializeNetwork: (roomId) => {
-        if (get().peerId) return;
+        if (peerInitialized) return;
+        peerInitialized = true;
 
         const peer = new Peer();
 
         const setupConnectionListeners = (conn: DataConnection) => {
             conn.on('open', () => {
+                const wasEmpty = get().connections.length === 0;
                 set((state) => ({ connections: [...state.connections, conn] }));
+                if (wasEmpty) set({ showBettingPanel: true });
+                // introduce ourselves
+                conn.send({ type: 'HELLO', tag: get().displayName || get().gamerTag });
             });
 
             conn.on('close', () => {
-                set((state) => ({ connections: state.connections.filter(c => c.peer !== conn.peer) }));
+                const tag = get().playerNames[conn.peer] ?? conn.peer;
+                set((state) => ({
+                    connections: state.connections.filter(c => c.peer !== conn.peer),
+                    playerNames: Object.fromEntries(Object.entries(state.playerNames).filter(([k]) => k !== conn.peer)),
+                }));
                 get().removeCursor(conn.peer);
+                get().pushToast({ variant: 'warn', title: 'Player left', description: `${tag} has left the session.` });
             });
 
             conn.on('data', (data: any) => {
-                if (data.type === 'ROLL') {
+                if (data.type === 'HELLO') {
+                    set((state) => ({ playerNames: { ...state.playerNames, [conn.peer]: data.tag } }));
+                    get().pushToast({ variant: 'notif', title: 'Player joined', description: `${data.tag} has joined the session.` });
+                } else if (data.type === 'KICKED') {
+                    get().connections.forEach(c => c.close());
+                    set({ connections: [], cursors: {}, playerNames: {} });
+                } else if (data.type === 'ROLL') {
                     get().receiveRemoteRoll(data.rollData);
                     if (get().isHost) {
                         get().connections.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
@@ -218,6 +283,11 @@ export const useStore = create<GameState>((set, get) => ({
                     }
                 } else if (data.type === 'TOGGLE_LOCK') {
                     set({ lockedDice: data.lockedDice });
+                    if (get().isHost) {
+                        get().connections.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
+                    }
+                } else if (data.type === 'RESET_SCORES') {
+                    set({ scores: {} });
                     if (get().isHost) {
                         get().connections.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
                     }
@@ -265,7 +335,8 @@ export const useStore = create<GameState>((set, get) => ({
     triggerLocalRoll: () => {
         if (get().isRolling) return;
 
-        const { diceCount, lockedDice, diceResults, betAmount, betMultiplier, gamerTag, peerId } = get();
+        const { diceCount, lockedDice, diceResults, betAmount, betMultiplier, gamerTag, displayName, peerId } = get();
+        const rollerTag = displayName || gamerTag;
         const impulses = [];
         const torques = [];
         const newResults = [...diceResults];
@@ -294,7 +365,7 @@ export const useStore = create<GameState>((set, get) => ({
             impulses,
             torques,
             lockedIndices: lockedDice,
-            rollerTag: gamerTag,
+            rollerTag: rollerTag,
             rollerPeerId: peerId!,
             betAmount,
             betMultiplier,

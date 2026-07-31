@@ -1,4 +1,4 @@
-import { Suspense, useRef, useMemo } from 'react';
+import React, { Suspense, useRef, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Environment, OrbitControls, ContactShadows, Text, useGLTF, useTexture } from '@react-three/drei';
@@ -9,6 +9,9 @@ import * as THREE from 'three';
 
 function Table() {
     const { scene } = useGLTF('/table.gltf');
+    useMemo(() => {
+        scene.traverse((child) => { child.castShadow = true; });
+    }, [scene]);
     return <primitive object={scene} position={[0, 0, 0]} />;
 }
 
@@ -56,13 +59,13 @@ function CustomBoard({ model, variant }: { model: string; variant: string | null
 
     useMemo(() => {
         if (variant) return;
-        scene.traverse((child) => {
+        cloned.traverse((child) => {
             const mesh = child as THREE.Mesh;
             if (!mesh.isMesh) return;
             const orig = originalMaterials.get(mesh);
             if (orig) mesh.material = orig;
         });
-    }, [variant, scene, originalMaterials]);
+    }, [variant, cloned, originalMaterials]);
 
     return (
         <>
@@ -72,11 +75,43 @@ function CustomBoard({ model, variant }: { model: string; variant: string | null
     );
 }
 
-// MARK: Scene
+const MAIN_LIGHT_PROPS = {
+    position: [150, 150, 300] as [number, number, number],
+    castShadow: true,
+    intensity: 2.5,
+    color: '#fdf6e3',
+    'shadow-mapSize': [2048, 2048] as [number, number],
+    'shadow-camera-left': -200,
+    'shadow-camera-right': 200,
+    'shadow-camera-top': 200,
+    'shadow-camera-bottom': -200,
+    'shadow-camera-far': 1000,
+};
+
+function MainDirectionalLight() {
+    return <directionalLight {...MAIN_LIGHT_PROPS} />;
+}
+
+// MARK: Backdrop plane
+function BackdropPlane() {
+    const maps = useTexture(resolveVariantMaps('concrete_tile_facade_1k'));
+    useMemo(() => {
+        Object.values(maps).forEach((t) => {
+            if (!(t instanceof THREE.Texture)) return;
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(5, 5);
+        });
+    }, [maps]);
+    return (
+        <mesh position={[0, -9.85, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[150, 150]} />
+            <meshStandardMaterial {...maps} roughness={0.9} metalness={0.1} normalScale={1.5} />
+        </mesh>
+    );
+}
 export function Scene({ boardModel, boardVariant }: { boardModel: string; boardVariant: string | null }) {
     const { diceCount, cursors, broadcastCursor } = useStore();
     const lastBroadcast = useRef<number>(0);
-
     const containerRef = useRef<HTMLDivElement>(null);
 
     const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
@@ -89,16 +124,8 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
 
     return (
         <div ref={containerRef} className="absolute top-0 left-0 w-full h-full z-0">
-            <Canvas shadows camera={{ position: [0, 20, 20], fov: 50 }}>
-                <ambientLight intensity={0.2} />
-
-                <directionalLight
-                    position={[15, 10, 2]}
-                    castShadow
-                    intensity={0.2}
-                    color="#fdf6e3"
-                    shadow-mapSize={[1024, 1024]}
-                />
+            <Canvas shadows camera={{ position: [0, 20, 20], fov: 45 }}>
+                <MainDirectionalLight />
 
                 <Suspense fallback={null}>
                     <Physics gravity={[0, -9.81, 0]}>
@@ -107,7 +134,7 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                             <CustomBoard model={boardModel} variant={boardVariant} />
                             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} onPointerMove={handlePointerMove}>
                                 <planeGeometry args={[20, 20]} />
-                                <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+                                <meshBasicMaterial transparent opacity={0} depthWrite={false}/>
                             </mesh>
 
                             <CuboidCollider position={[-10, 5, 0]} args={[0.5, 5, 10]} />
@@ -127,7 +154,7 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                         <group key={id} position={[data.x, 0.05, data.z]}>
                             <mesh rotation={[-Math.PI / 2, 0, 0]}>
                                 <ringGeometry args={[0.2, 0.3, 32]} />
-                                <meshBasicMaterial color="#4ade80" transparent opacity={0.8} />
+                                <meshBasicMaterial color="#4ade80" transparent opacity={0} />
                             </mesh>
 
                             <Text
@@ -145,11 +172,13 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
 
                     <Table />
 
-                    <Environment preset="apartment" background blur={0.4} />
+                    <BackdropPlane />
+
+                    <Environment preset="lobby" background blur={0.75} environmentIntensity={0.5} />
 
                     <ContactShadows
                         position={[0, 0.01, 0]}
-                        opacity={0.1}
+                        opacity={1}
                         scale={20}
                         blur={2}
                         far={4}
@@ -157,17 +186,18 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                 </Suspense>
 
                 <OrbitControls
-                    makeDefault
-                    minPolarAngle={0}
-                    maxPolarAngle={Math.PI / 2.1}
-                    minDistance={5}
-                    maxDistance={40}
-                    enableDamping={true}
-                    dampingFactor={0.05}
-                    zoomSpeed={0.5}
-                    rotateSpeed={0.8}
-                />
+                        makeDefault
+                        minPolarAngle={0}
+                        maxPolarAngle={Math.PI / 2.1}
+                        minDistance={5}
+                        maxDistance={40}
+                        enableDamping
+                        dampingFactor={0.05}
+                        zoomSpeed={0.5}
+                        rotateSpeed={0.8}
+                    />
             </Canvas>
+
         </div>
     );
 }
