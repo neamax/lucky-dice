@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { useEffect, useRef, useMemo } from 'react';
-import { RigidBody, RapierRigidBody } from '@react-three/rapier';
+import { RigidBody, RapierRigidBody, CuboidCollider } from '@react-three/rapier';
 import { PositionalAudio, useGLTF } from '@react-three/drei';
 import { useStore } from './store';
 import { Vector3, Quaternion } from 'three';
@@ -45,6 +45,13 @@ export function Dice({ index, position }: { index: number, position: [number, nu
         lockEnabled,
         diceModel,
     } = useStore();
+
+    const { scene: diceScene } = useGLTF(diceModel);
+    const colliderHalfExtents = useMemo<[number, number, number]>(() => {
+        const box = new THREE.Box3().setFromObject(diceScene);
+        const size = box.getSize(new THREE.Vector3());
+        return [size.x / 2, size.y / 2, size.z / 2];
+    }, [diceScene]);
 
     const isLocked = lockEnabled && lockedDice.includes(index);
 
@@ -141,24 +148,20 @@ export function Dice({ index, position }: { index: number, position: [number, nu
         <RigidBody
             ref={rigidBodyRef}
             position={position}
-            colliders="cuboid"
+            colliders={false}
             restitution={0.6}
             friction={0.4}
             onSleep={calculateUpFace}
             onCollisionEnter={handleCollision}
             type={isLocked ? "fixed" : "dynamic"}
         >
+            <CuboidCollider args={colliderHalfExtents} />
             <group
                 onClick={handleDieClick}
                 onDoubleClick={handleDoubleClick}
                 onPointerOver={() => document.body.style.cursor = isRolling ? 'default' : 'pointer'}
                 onPointerOut={() => document.body.style.cursor = 'default'}
             >
-                {/* MARK: physics collider */}
-                <mesh visible={false}>
-                    <boxGeometry args={[1, 1, 1]} />
-                </mesh>
-
                 {/* visible GLB model */}
                 <DiceMesh isLocked={isLocked} model={diceModel} />
 

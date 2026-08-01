@@ -208,3 +208,4 @@ useGLTF.preload('/board.glb');
 useGLTF.preload('/board-2.glb');
 useGLTF.preload('/dice.glb');
 useGLTF.preload('/dice-2.glb');
+useGLTF.preload('/dice-3.glb');

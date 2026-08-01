@@ -88,7 +88,7 @@ export const useStore = create<GameState>((set, get) => ({
     connections: [],
 
     boardModel: Cookies.get('boardModel') || '/board.glb',
-    boardVariants: JSON.parse(Cookies.get('boardVariants') || 'null') ?? { '/board.glb': null, '/board-2.glb': null },
+    boardVariants: JSON.parse(Cookies.get('boardVariants') || 'null') ?? { '/board.glb': 'concrete_tile_facade_1k', '/board-2.glb': 'concrete_tile_facade_1k' },
     diceModel: Cookies.get('diceModel') || '/dice.glb',
     diceCount: Number(Cookies.get('diceCount')) || 2,
     diceResults: Array(Number(Cookies.get('diceCount')) || 2).fill(null),
