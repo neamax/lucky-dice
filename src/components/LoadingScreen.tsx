@@ -44,6 +44,10 @@ export function LoadingScreen({ onDone, minDuration = 1000 }: { onDone: () => vo
                         <ProgressIndicator />
                     </ProgressTrack>
                 </ProgressPrimitive.Root>
+                <div className="flex flex-col items-center justify-center gap-0">
+                    <span className="text-sm font-medium tracking-tight text-white/80">Developed by LuckyGene Indie Studio</span>
+                    <span className="text-xs font-normal text-white/80">https://www.luckygene.net</span>
+                </div>
             </div>
         </div>
     );

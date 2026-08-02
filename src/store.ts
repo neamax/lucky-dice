@@ -3,6 +3,7 @@ import Cookies from 'js-cookie';
 import Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import type { Toast } from './components/ui/toast';
+import { getStartRotations, applyRemoteTransforms, dragFrameBuffer } from './Dice';
 
 const MAX_PLAYERS = 10;
 let peerInitialized = false;
@@ -11,11 +12,20 @@ interface RollData {
     id: number;
     impulses: { x: number, y: number, z: number }[];
     torques: { x: number, y: number, z: number }[];
+    startPositions?: { x: number, y: number, z: number }[];
+    startRotations?: { x: number, y: number, z: number, w: number }[];
     lockedIndices: number[];
     rollerTag: string;
     rollerPeerId: string;
     betAmount: number;
     betMultiplier: number;
+}
+
+export interface RollResultData {
+    rollId: number;
+    results: (number | null)[];
+    finalPositions: { x: number, y: number, z: number }[];
+    finalRotations: { x: number, y: number, z: number, w: number }[];
 }
 
 interface CursorData {
@@ -44,6 +54,7 @@ interface GameState {
     diceResults: (number | null)[];
     isRolling: boolean;
     rollEvent: RollData | null;
+    rollResult: RollResultData | null;
 
     cursors: Record<string, CursorData>;
     playerNames: Record<string, string>;
@@ -95,6 +106,9 @@ interface GameState {
     endDiceDrag: () => void;
     setDiceResult: (index: number, result: number) => void;
     receiveRemoteRoll: (data: RollData) => void;
+    receiveDiceFrame: (transforms: { px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number }[], drag?: boolean) => void;
+    receiveRollResult: (data: RollResultData) => void;
+    broadcastRollResult: (data: RollResultData) => void;
     setDiceCount: (count: number) => void;
     toggleLockDie: (index: number) => void;
 
@@ -145,6 +159,7 @@ export const useStore = create<GameState>((set, get) => ({
     diceResults: Array(Number(Cookies.get('diceCount')) || 2).fill(null),
     isRolling: false,
     rollEvent: null,
+    rollResult: null,
     cursors: {},
     playerNames: {},
     lockedDice: [],
@@ -156,7 +171,7 @@ export const useStore = create<GameState>((set, get) => ({
     lastRollSum: null,
     prevRollSum: null,
     lastRollPair: false,
-    showBettingPanel: Cookies.get('showBettingPanel') === 'true',
+    showBettingPanel: Cookies.get('showBettingPanel') !== 'false',
     isDragging: false,
     toasts: [],
 
@@ -316,6 +331,7 @@ export const useStore = create<GameState>((set, get) => ({
             rollEvent: null,
             lockedDice: [],
             isRolling: false,
+            showBettingPanel: true,
         });
         const msg = { type: 'SESSION_START', turnOrder: order, roundNumber: 1, scores: freshScores };
         connections.forEach(c => c.send(msg));
@@ -343,6 +359,11 @@ export const useStore = create<GameState>((set, get) => ({
                     conn.send({ type: 'FULL' });
                     conn.close();
                     return;
+                }
+
+                // reset solo scores when first multiplayer connection opens
+                if (get().isHost && connections.length === 0) {
+                    set({ scores: {}, lastRollSum: null, prevRollSum: null });
                 }
 
                 set((state) => ({ connections: [...state.connections, conn] }));
@@ -408,6 +429,8 @@ export const useStore = create<GameState>((set, get) => ({
 
                 } else if (data.type === 'FULL') {
                     get().pushToast({ variant: 'warn', title: 'Session full', description: 'This session has reached the maximum of 10 players.' });
+                    conn.close();
+                    set({ connections: [], isHost: true });
 
                 } else if (data.type === 'APPEARANCE') {
                     if (!get().isHost) {
@@ -427,6 +450,7 @@ export const useStore = create<GameState>((set, get) => ({
                         rollEvent: null,
                         lockedDice: [],
                         isRolling: false,
+                        showBettingPanel: true,
                     });
                     const firstId = data.turnOrder[0];
                     const firstName = get().playerNames[firstId] || (firstId === peerId ? (displayName || gamerTag) : firstId);
@@ -474,8 +498,25 @@ export const useStore = create<GameState>((set, get) => ({
                     get().connections.forEach(c => c.close());
                     set({ connections: [], cursors: {}, playerNames: {}, sessionActive: false, turnOrder: [] });
 
+                } else if (data.type === 'FAULT') {
+                    get().pushToast({ variant: 'error', title: '⚠️ Fault!', description: `${data.tag}'s dice left the table.` });
+                    set({ isRolling: false, diceResults: Array(get().diceCount).fill(null), rollEvent: null, lockedDice: [] });
+                    if (isHost) conns.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
+
                 } else if (data.type === 'ROLL') {
                     get().receiveRemoteRoll(data.rollData);
+                    if (isHost) {
+                        conns.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
+                    }
+
+                } else if (data.type === 'DICE_FRAME') {
+                    get().receiveDiceFrame(data.transforms, data.drag);
+                    if (isHost) {
+                        conns.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
+                    }
+
+                } else if (data.type === 'ROLL_RESULT') {
+                    get().receiveRollResult(data.rollResultData);
                     if (isHost) {
                         conns.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
                     }
@@ -551,6 +592,9 @@ export const useStore = create<GameState>((set, get) => ({
             return;
         }
 
+        // broadcast fault to all peers so they reset rolling state
+        connections.forEach(c => c.send({ type: 'FAULT', peerId, tag: myTag }));
+
         // multiplayer session: submit 0-sum result and advance turn
         if (sessionActive) {
             const newRoundResults = [...roundResults, { peerId, tag: myTag, sum: 0, delta: 0 }];
@@ -576,12 +620,28 @@ export const useStore = create<GameState>((set, get) => ({
     },
 
     receiveRemoteRoll: (rollData) => {
-        const { diceCount, lockedDice, diceResults } = get();
+        const { diceCount, diceResults } = get();
         const newResults = [...diceResults];
+        const lockedIndices = rollData.lockedIndices ?? [];
         for (let i = 0; i < diceCount; i++) {
-            if (!lockedDice.includes(i)) newResults[i] = null;
+            if (!lockedIndices.includes(i)) newResults[i] = null;
         }
-        set({ isRolling: true, diceResults: newResults, rollEvent: rollData });
+        dragFrameBuffer.length = 0;
+        // sync remote roll event and locked dice state across connected peers
+        set({ isRolling: true, lockedDice: lockedIndices, diceResults: newResults, rollEvent: rollData });
+    },
+
+    receiveDiceFrame: (transforms, drag = false) => {
+        applyRemoteTransforms(transforms, drag);
+    },
+
+    receiveRollResult: (data) => {
+        set({ rollResult: data, diceResults: data.results, isRolling: false });
+    },
+
+    broadcastRollResult: (data) => {
+        set({ rollResult: data });
+        get().connections.forEach(c => c.send({ type: 'ROLL_RESULT', rollResultData: data }));
     },
 
     triggerLocalRoll: (strength = 1) => {
@@ -598,9 +658,13 @@ export const useStore = create<GameState>((set, get) => ({
         const rollerTag = displayName || gamerTag;
         const impulses = [];
         const torques = [];
+        const startPositions = [];
         const newResults = [...diceResults];
 
         for (let i = 0; i < diceCount; i++) {
+            const offset = (i - (diceCount - 1) / 2) * 2;
+            startPositions.push({ x: offset, y: 3, z: 0 });
+
             if (lockedDice.includes(i)) {
                 impulses.push({ x: 0, y: 0, z: 0 });
                 torques.push({ x: 0, y: 0, z: 0 });
@@ -624,6 +688,8 @@ export const useStore = create<GameState>((set, get) => ({
             id: Date.now(),
             impulses,
             torques,
+            startPositions,
+            startRotations: getStartRotations(diceCount, lockedDice),
             lockedIndices: lockedDice,
             rollerTag,
             rollerPeerId: peerId!,
@@ -632,10 +698,8 @@ export const useStore = create<GameState>((set, get) => ({
         };
 
         set({ isRolling: true, diceResults: newResults, rollEvent: rollData });
-        // in a turn session each player rolls independently
-        if (!get().sessionActive) {
-            get().connections.forEach((conn) => conn.send({ type: 'ROLL', rollData }));
-        }
+        // broadcast roll physics data to all connected peers
+        get().connections.forEach((conn) => conn.send({ type: 'ROLL', rollData }));
     },
 
     setDiceResult: (index, result) => {
@@ -678,6 +742,10 @@ export const useStore = create<GameState>((set, get) => ({
 
         // turn-based multiplayer
         if (sessionActive) {
+            // scope round outcome submission to active roller
+            const isRoller = rollEvent.rollerPeerId === peerId;
+            if (!isRoller) return;
+
             const newRoundResults = [...roundResults, { peerId: peerId!, tag: myTag, sum, delta: 0 }];
 
             if (isHost) {

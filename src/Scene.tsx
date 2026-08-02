@@ -111,14 +111,14 @@ function BackdropPlane() {
         Object.values(maps).forEach((t) => {
             if (!(t instanceof THREE.Texture)) return;
             t.wrapS = t.wrapT = THREE.RepeatWrapping;
-            t.repeat.set(6, 6);
+            t.repeat.set(5, 5);
         });
     }, [maps]);
     return (
         <RigidBody type="fixed" restitution={0.3} friction={0.8} colliders={false}>
             <CuboidCollider position={[0, -9.85, 0]} args={[125, 0.1, 125]} />
             <mesh position={[0, -9.85, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-                <planeGeometry args={[250, 250]} />
+                <planeGeometry args={[500, 500]} />
                 <meshStandardMaterial {...maps} roughness={0.95} metalness={0.05} normalScale={2} />
             </mesh>
         </RigidBody>
@@ -217,6 +217,8 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                     dampingFactor={0.025}
                     zoomSpeed={0.5}
                     rotateSpeed={0.8}
+                    enablePan={false}
+                    touches={{ ONE: 0, TWO: 3 }}
                 />
             </Canvas>
 

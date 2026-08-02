@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
-  Dices, Palette, Users, QrCode, Copy, Check, X, User, Trash2, Info, Globe, Code2, Trophy,
+  Dices, Palette, Users, QrCode, Copy, Check, X, User, Trash2, Info, Globe, Code2,
 } from 'lucide-react';
 import { useStore } from '../store';
-import type { RoundResult } from '../store';
 import {
   NavigationMenu,
   NavigationMenuList,
@@ -77,10 +76,9 @@ export function FloatingMenu() {
     isHost, connections, peerId, cursors, playerNames, kickPlayer,
     gamerTag, displayName, setDisplayName,
     resetScores,
-    sessionActive, turnOrder, currentTurnIndex, roundNumber, lastRoundResults,
+    sessionActive, turnOrder, currentTurnIndex, roundNumber,
   } = useStore();
 
-  const [showRoundResults, setShowRoundResults] = useState<RoundResult[] | null>(null);
 
   const [] = useState(() => {
     if (typeof window !== 'undefined' && peerId) return `${window.location.origin}?room=${peerId}`;
@@ -99,12 +97,6 @@ export function FloatingMenu() {
     ? myTag
     : (playerNames[currentTurnPeerId] || currentTurnPeerId);
 
-  // show round results when they arrive
-  const prevLastRound = useState<RoundResult[] | null>(null);
-  if (lastRoundResults && lastRoundResults !== prevLastRound[0]) {
-    prevLastRound[1](lastRoundResults);
-    setShowRoundResults(lastRoundResults);
-  }
 
   const copyLink = () => {
     const url = `${window.location.origin}?room=${peerId}`;
@@ -132,7 +124,7 @@ export function FloatingMenu() {
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Dices size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className=" max-md:leading-none">Game</span>
+                <span className="text-xs max-md:leading-none font-normal">Game</span>
               </NavigationMenuTrigger>
               <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-4">
                 <Dialog>
@@ -194,7 +186,7 @@ export function FloatingMenu() {
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Palette size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className=" max-md:leading-none">Appearance</span>
+                <span className=" text-xs max-md:leading-none font-normal">Appearance</span>
               </NavigationMenuTrigger>
               <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-4">
                 <div>
@@ -240,7 +232,7 @@ export function FloatingMenu() {
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Users size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className=" max-md:leading-none">Multiplayer</span>
+                <span className=" text-xs max-md:leading-none font-normal">Multiplayer</span>
               </NavigationMenuTrigger>
               <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-3">
                 <div>
@@ -333,7 +325,7 @@ export function FloatingMenu() {
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Info size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className=" max-md:leading-none">About</span>
+                <span className="text-xs max-md:leading-none font-normal">About</span>
               </NavigationMenuTrigger>
               <NavigationMenuContent className="p-2 min-w-[50vw] md:min-w-[220px] flex flex-col gap-0.5">
                 <AlertDialog>
@@ -374,7 +366,7 @@ export function FloatingMenu() {
 
       {/* MARK: QR Modal */}
       {showQR && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-popover border border-border rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col items-center">
             <div className="w-full flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">Scan to Join</h2>
@@ -395,29 +387,6 @@ export function FloatingMenu() {
         </div>
       )}
 
-      {/* MARK: Round Results */}
-      {showRoundResults && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-popover border border-border rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Trophy size={18} /> Round {roundNumber - 1} Results</h2>
-              <button onClick={() => setShowRoundResults(null)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><X size={20} /></button>
-            </div>
-            <div className="flex flex-col gap-1">
-              {[...showRoundResults].sort((a, b) => b.sum - a.sum).map((r, i) => (
-                <div key={r.peerId} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${i === 0 ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-muted'}`}>
-                  <span className="text-sm font-medium w-4 text-muted-foreground">{i + 1}.</span>
-                  <span className="text-sm flex-1 font-medium">{r.tag}</span>
-                  <span className="text-sm text-muted-foreground">Sum: {r.sum}</span>
-                  <span className={`text-sm font-semibold ml-2 ${r.delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {r.delta >= 0 ? '+' : ''}{r.delta}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
