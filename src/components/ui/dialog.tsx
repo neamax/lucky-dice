@@ -89,7 +89,9 @@ function DialogClose({ className, variant = "outline", size = "default", ...prop
   return (
     <DialogPrimitive.Close
       data-slot="dialog-close"
-      className={cn(className)}
+      className={cn(
+        "cursor-pointer",
+        className)}
       render={<Button variant={variant} size={size} />}
       {...props}
     />

@@ -6,7 +6,9 @@ import { Physics, RigidBody, CuboidCollider } from '@react-three/rapier';
 import { Dice } from './Dice';
 import { useStore } from './store';
 import * as THREE from 'three';
+import { BOARD_MATERIALS, BOARD_MATERIAL_REPEAT_DEFAULT } from './data/appearance';
 
+// MARK: Table
 function Table() {
     const { scene } = useGLTF('/table.gltf');
     useMemo(() => {
@@ -15,6 +17,7 @@ function Table() {
     return <primitive object={scene} position={[0, 0, 0]} />;
 }
 
+// MARK: Variants
 function resolveVariantMaps(variant: string) {
     const prefix = variant.replace(/_1k$/, '');
     return {
@@ -28,15 +31,23 @@ function VariantMaterial({ variant, scene }: { variant: string; scene: THREE.Gro
     const maps = useTexture(resolveVariantMaps(variant));
 
     useMemo(() => {
+        const repeat = BOARD_MATERIALS.find(m => m.value === variant)?.repeat ?? BOARD_MATERIAL_REPEAT_DEFAULT;
         scene.traverse((child) => {
             const mesh = child as THREE.Mesh;
             if (!mesh.isMesh) return;
-            mesh.material = new THREE.MeshStandardMaterial({ ...maps, roughness: 1, metalness: 0 });
+            const mat = new THREE.MeshStandardMaterial({ ...maps, roughness: 1, metalness: 0 });
+            Object.values(maps).forEach(t => {
+                if (!(t instanceof THREE.Texture)) return;
+                t.wrapS = t.wrapT = THREE.RepeatWrapping;
+                t.repeat.set(...repeat);
+            });
+            mesh.material = mat;
         });
-    }, [scene, maps]);
+    }, [scene, maps, variant]);
 
     return null;
 }
+
 
 // MARK: Board
 function CustomBoard({ model, variant }: { model: string; variant: string | null }) {
@@ -75,17 +86,18 @@ function CustomBoard({ model, variant }: { model: string; variant: string | null
     );
 }
 
+// MARK: Lighting
 const MAIN_LIGHT_PROPS = {
     position: [150, 150, 300] as [number, number, number],
     castShadow: true,
-    intensity: 2.5,
+    intensity: 3,
     color: '#fdf6e3',
     'shadow-mapSize': [2048, 2048] as [number, number],
-    'shadow-camera-left': -200,
-    'shadow-camera-right': 200,
-    'shadow-camera-top': 200,
-    'shadow-camera-bottom': -200,
-    'shadow-camera-far': 1000,
+    'shadow-camera-left': -300,
+    'shadow-camera-right': 300,
+    'shadow-camera-top': 300,
+    'shadow-camera-bottom': -300,
+    'shadow-camera-far': 2000,
 };
 
 function MainDirectionalLight() {
@@ -99,21 +111,29 @@ function BackdropPlane() {
         Object.values(maps).forEach((t) => {
             if (!(t instanceof THREE.Texture)) return;
             t.wrapS = t.wrapT = THREE.RepeatWrapping;
-            t.repeat.set(5, 5);
+            t.repeat.set(6, 6);
         });
     }, [maps]);
     return (
-        <mesh position={[0, -9.85, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[150, 150]} />
-            <meshStandardMaterial {...maps} roughness={0.9} metalness={0.1} normalScale={1.5} />
-        </mesh>
+        <RigidBody type="fixed" restitution={0.3} friction={0.8} colliders={false}>
+            <CuboidCollider position={[0, -9.85, 0]} args={[125, 0.1, 125]} />
+            <mesh position={[0, -9.85, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+                <planeGeometry args={[250, 250]} />
+                <meshStandardMaterial {...maps} roughness={0.95} metalness={0.05} normalScale={2} />
+            </mesh>
+        </RigidBody>
     );
 }
+
+
+// Scene
 export function Scene({ boardModel, boardVariant }: { boardModel: string; boardVariant: string | null }) {
-    const { diceCount, cursors, broadcastCursor } = useStore();
+    const { diceCount, cursors, broadcastCursor, isDragging } = useStore();
+    const triggerFault = useStore(s => s.triggerFault);
     const lastBroadcast = useRef<number>(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
+    // MARK: Cursor broadcasting
     const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
         const now = Date.now();
         if (now - lastBroadcast.current > 50) {
@@ -124,7 +144,7 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
 
     return (
         <div ref={containerRef} className="absolute top-0 left-0 w-full h-full z-0">
-            <Canvas shadows camera={{ position: [0, 20, 20], fov: 45 }}>
+            <Canvas shadows camera={{ position: [0, 20, 40], fov: 45 }}>
                 <MainDirectionalLight />
 
                 <Suspense fallback={null}>
@@ -134,7 +154,7 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                             <CustomBoard model={boardModel} variant={boardVariant} />
                             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} onPointerMove={handlePointerMove}>
                                 <planeGeometry args={[20, 20]} />
-                                <meshBasicMaterial transparent opacity={0} depthWrite={false}/>
+                                <meshBasicMaterial transparent opacity={0} depthWrite={false} />
                             </mesh>
 
                             <CuboidCollider position={[-10, 5, 0]} args={[0.5, 5, 10]} />
@@ -145,11 +165,13 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
 
                         {Array.from({ length: diceCount }).map((_, i) => {
                             const offset = (i - (diceCount - 1) / 2) * 2;
-                            return <Dice key={i} index={i} position={[offset, 3, 0]} />;
+                            return <Dice key={i} index={i} position={[offset, 3, 0]} onFloorHit={triggerFault} />;
                         })}
+
+                        <BackdropPlane />
                     </Physics>
 
-                    {/* MARK: remote cursors */}
+                    {/* MARK: Player Indi */}
                     {Object.entries(cursors).map(([id, data]) => (
                         <group key={id} position={[data.x, 0.05, data.z]}>
                             <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -172,8 +194,6 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
 
                     <Table />
 
-                    <BackdropPlane />
-
                     <Environment preset="lobby" background blur={0.75} environmentIntensity={0.5} />
 
                     <ContactShadows
@@ -185,17 +205,19 @@ export function Scene({ boardModel, boardVariant }: { boardModel: string; boardV
                     />
                 </Suspense>
 
+                {/* MARK: Camera */}
                 <OrbitControls
-                        makeDefault
-                        minPolarAngle={0}
-                        maxPolarAngle={Math.PI / 2.1}
-                        minDistance={5}
-                        maxDistance={40}
-                        enableDamping
-                        dampingFactor={0.05}
-                        zoomSpeed={0.5}
-                        rotateSpeed={0.8}
-                    />
+                    makeDefault
+                    enabled={!isDragging}
+                    minPolarAngle={0}
+                    maxPolarAngle={Math.PI / 2.1}
+                    minDistance={10}
+                    maxDistance={60}
+                    enableDamping
+                    dampingFactor={0.025}
+                    zoomSpeed={0.5}
+                    rotateSpeed={0.8}
+                />
             </Canvas>
 
         </div>

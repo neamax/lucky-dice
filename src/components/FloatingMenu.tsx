@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
-  Dices, Palette, Users, QrCode, Copy, Check, X, User, Trash2, Info, Globe, Code2,
+  Dices, Palette, Users, QrCode, Copy, Check, X, User, Trash2, Info, Globe, Code2, Trophy,
 } from 'lucide-react';
 import { useStore } from '../store';
+import type { RoundResult } from '../store';
 import {
   NavigationMenu,
   NavigationMenuList,
@@ -31,7 +32,7 @@ import {
 import { Input } from './ui/input';
 
 function SectionLabel({ children, inline }: { children: React.ReactNode; inline?: boolean }) {
-  return <p className={cn('text-xs text-muted-foreground uppercase tracking-widest', !inline && 'mb-1.5')}>{children}</p>;
+  return <p className={cn('text-xs text-muted-foreground tracking-widest', !inline && 'mb-1.5')}>{children}</p>;
 }
 
 function ToggleGroup<T extends string | number>({
@@ -69,13 +70,17 @@ export function FloatingMenu() {
   const {
     isRolling, diceCount, setDiceCount,
     lockEnabled, toggleLockFeature,
+    autoReroll, toggleAutoReroll,
     showBettingPanel, toggleBettingPanel,
     boardModel, setBoardModel, boardVariants, setBoardVariant,
     diceModel, setDiceModel,
     isHost, connections, peerId, cursors, playerNames, kickPlayer,
     gamerTag, displayName, setDisplayName,
     resetScores,
+    sessionActive, turnOrder, currentTurnIndex, roundNumber, lastRoundResults,
   } = useStore();
+
+  const [showRoundResults, setShowRoundResults] = useState<RoundResult[] | null>(null);
 
   const [] = useState(() => {
     if (typeof window !== 'undefined' && peerId) return `${window.location.origin}?room=${peerId}`;
@@ -86,6 +91,20 @@ export function FloatingMenu() {
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   const currentVariant = boardVariants[boardModel] ?? null;
+
+  const myTag = displayName || gamerTag;
+  const currentTurnPeerId = turnOrder[currentTurnIndex];
+  const isMyTurn = currentTurnPeerId === peerId;
+  const currentTurnName = currentTurnPeerId === peerId
+    ? myTag
+    : (playerNames[currentTurnPeerId] || currentTurnPeerId);
+
+  // show round results when they arrive
+  const prevLastRound = useState<RoundResult[] | null>(null);
+  if (lastRoundResults && lastRoundResults !== prevLastRound[0]) {
+    prevLastRound[1](lastRoundResults);
+    setShowRoundResults(lastRoundResults);
+  }
 
   const copyLink = () => {
     const url = `${window.location.origin}?room=${peerId}`;
@@ -109,13 +128,13 @@ export function FloatingMenu() {
               </div>
             </NavigationMenuItem>
 
-            {/* Game */}
+            {/* MARK: Game */}
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Dices size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className="max-md:text-[10px] max-md:leading-none">Game</span>
+                <span className=" max-md:leading-none">Game</span>
               </NavigationMenuTrigger>
-              <NavigationMenuContent className="p-4 min-w-[220px] flex flex-col gap-4">
+              <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-4">
                 <Dialog>
                   <DialogTrigger className="flex items-center gap-2 bg-muted hover:bg-accent border border-border px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer w-full">
                     <Dices size={15} /> New Game
@@ -155,6 +174,13 @@ export function FloatingMenu() {
                   />
                 </div>
                 <div className="flex items-center justify-between gap-4">
+                  <SectionLabel inline>Fault Auto Re-roll</SectionLabel>
+                  <Switch
+                    checked={autoReroll}
+                    onCheckedChange={toggleAutoReroll}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
                   <SectionLabel inline>Betting Panel</SectionLabel>
                   <Switch
                     checked={showBettingPanel}
@@ -164,13 +190,24 @@ export function FloatingMenu() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            {/* Appearance */}
+            {/* MARK: Appearance */}
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Palette size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className="max-md:text-[10px] max-md:leading-none">Appearance</span>
+                <span className=" max-md:leading-none">Appearance</span>
               </NavigationMenuTrigger>
-              <NavigationMenuContent className="p-4 min-w-[220px] flex flex-col gap-4">
+              <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-4">
+                <div>
+                  <SectionLabel>Dice Model</SectionLabel>
+                  <Select value={diceModel} onValueChange={(v) => setDiceModel(v as typeof diceModel)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue>{DICE_MODELS.find(m => m.value === diceModel)?.label}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DICE_MODELS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <SectionLabel>Board Model</SectionLabel>
                   <Select value={boardModel} onValueChange={(v) => setBoardModel(v as typeof boardModel)}>
@@ -196,27 +233,16 @@ export function FloatingMenu() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <SectionLabel>Dice Model</SectionLabel>
-                  <Select value={diceModel} onValueChange={(v) => setDiceModel(v as typeof diceModel)}>
-                    <SelectTrigger size="sm" className="w-full">
-                      <SelectValue>{DICE_MODELS.find(m => m.value === diceModel)?.label}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DICE_MODELS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            {/* Multiplayer */}
+            {/* MARK: Multiplayer */}
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Users size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className="max-md:text-[10px] max-md:leading-none">Multiplayer</span>
+                <span className=" max-md:leading-none">Multiplayer</span>
               </NavigationMenuTrigger>
-              <NavigationMenuContent className="p-4 min-w-[220px] flex flex-col gap-3">
+              <NavigationMenuContent className="p-4 min-w-[60vw] md:min-w-[220px] flex flex-col gap-3">
                 <div>
                   <SectionLabel>Your Tag</SectionLabel>
                   <div className="flex items-center gap-2 mb-2">
@@ -274,6 +300,11 @@ export function FloatingMenu() {
                     </DrawerContent>
                   </Drawer>
                 </div>
+                {sessionActive && (
+                  <div className="bg-muted rounded-lg px-3 py-2 text-sm">
+                    <p className="text-xs text-muted-foreground mb-0.5">Round {roundNumber} — {isMyTurn ? <span className="text-green-400 font-semibold">Your turn!</span> : <span>{currentTurnName}'s turn</span>}</p>
+                  </div>
+                )}
                 {isHost && (
                   <div className="flex flex-col gap-2">
                     <SectionLabel>Invite</SectionLabel>
@@ -298,26 +329,26 @@ export function FloatingMenu() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            {/* About */}
+            {/* MARK: About */}
             <NavigationMenuItem>
               <NavigationMenuTrigger className="max-md:flex-col max-md:h-auto max-md:px-3 max-md:py-1 max-md:gap-1" hideChevron={isMobile}>
                 <Info size={15} className="mr-1.5 md:inline max-md:mr-0 max-md:size-6" />
-                <span className="max-md:text-[10px] max-md:leading-none">About</span>
+                <span className=" max-md:leading-none">About</span>
               </NavigationMenuTrigger>
-              <NavigationMenuContent className="p-2 min-w-[220px] flex flex-col gap-0.5">
+              <NavigationMenuContent className="p-2 min-w-[50vw] md:min-w-[220px] flex flex-col gap-0.5">
                 <AlertDialog>
                   <AlertDialogTrigger className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-accent transition-colors cursor-pointer w-full text-left">
                     <Info size={14} /> About LuckyDice
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
-                      <AlertDialogTitle>🎲 LuckyDice</AlertDialogTitle>
+                      <AlertDialogTitle className="flex justify-center items-center"><img src="/dice.png" alt="LuckyDice" className="w-8 h-8 mr-2" /> LuckyDice</AlertDialogTitle>
                       <AlertDialogDescription className="space-y-3">
                         An open-source dice game where physics meets fun. Roll in 3D, challenge friends in real-time, and let luck decide your fate.
                         <br /><br />
                         Built with React, Three.js, and Rapier physics — because even a dice roll deserves a little drama.
                         <br /><br />
-                        <span className="text-xs">Crafted with ❤️ by <span className="font-medium text-foreground">Neama Kazemi</span> at <span className="font-medium text-foreground">LuckyGene Indie Studio</span></span>
+                        <span className="text-xs">Crafted by <a href="https://neama.luckygene.net" target="_blank" rel="noreferrer" className="font-medium text-foreground hover:underline">Neama Kazemi</a> at <a href="https://www.luckygene.net" target="_blank" rel="noreferrer" className="font-medium text-foreground hover:underline">LuckyGene Indie Studio</a></span>
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -332,7 +363,7 @@ export function FloatingMenu() {
                   <Code2 size={14} /> Developer
                 </a>
                 <a href="https://github.com/neamax/lucky-dice" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-accent transition-colors w-full">
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg> GitHub
+                  <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" /></svg> GitHub
                 </a>
               </NavigationMenuContent>
             </NavigationMenuItem>
@@ -341,7 +372,7 @@ export function FloatingMenu() {
         </NavigationMenu>
       </div>
 
-      {/* QR Modal */}
+      {/* MARK: QR Modal */}
       {showQR && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-popover border border-border rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col items-center">
@@ -359,6 +390,30 @@ export function FloatingMenu() {
               <button onClick={copyLink} className="bg-primary hover:bg-primary/90 text-primary-foreground p-2 rounded-lg transition-colors flex items-center justify-center cursor-pointer min-w-[40px] shrink-0">
                 {copied ? <Check size={16} /> : <Copy size={16} />}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MARK: Round Results */}
+      {showRoundResults && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-popover border border-border rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col gap-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-bold flex items-center gap-2"><Trophy size={18} /> Round {roundNumber - 1} Results</h2>
+              <button onClick={() => setShowRoundResults(null)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><X size={20} /></button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {[...showRoundResults].sort((a, b) => b.sum - a.sum).map((r, i) => (
+                <div key={r.peerId} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${i === 0 ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-muted'}`}>
+                  <span className="text-sm font-medium w-4 text-muted-foreground">{i + 1}.</span>
+                  <span className="text-sm flex-1 font-medium">{r.tag}</span>
+                  <span className="text-sm text-muted-foreground">Sum: {r.sum}</span>
+                  <span className={`text-sm font-semibold ml-2 ${r.delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {r.delta >= 0 ? '+' : ''}{r.delta}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
