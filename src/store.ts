@@ -500,7 +500,7 @@ export const useStore = create<GameState>((set, get) => ({
 
                 } else if (data.type === 'FAULT') {
                     get().pushToast({ variant: 'error', title: '⚠️ Fault!', description: `${data.tag}'s dice left the table.` });
-                    set({ isRolling: false, diceResults: Array(get().diceCount).fill(null), rollEvent: null, lockedDice: [] });
+                    set({ isRolling: false, diceResults: Array(get().diceCount).fill(null), lockedDice: [] });
                     if (isHost) conns.forEach((c) => { if (c.peer !== conn.peer) c.send(data); });
 
                 } else if (data.type === 'ROLL') {
@@ -575,18 +575,20 @@ export const useStore = create<GameState>((set, get) => ({
         pushToast({ variant: 'error', title: '⚠️ Fault!', description: `Dice left the table. ${Math.abs(penalty).toLocaleString()} point penalty.` });
         updateScore(peerId, myTag, penalty);
 
+        // Create reset roll to bring dice back to starting positions
+        const resetRoll: RollData = {
+            id: Date.now(),
+            impulses: Array(diceCount).fill({ x: 0, y: 0, z: 0 }),
+            torques: Array(diceCount).fill({ x: 0, y: 0, z: 0 }),
+            lockedIndices: [],
+            rollerTag: myTag,
+            rollerPeerId: peerId!,
+            betAmount,
+            betMultiplier,
+        };
+
         // solo: reset dice to initial position
         if (connections.length === 0) {
-            const resetRoll: RollData = {
-                id: Date.now(),
-                impulses: Array(diceCount).fill({ x: 0, y: 0, z: 0 }),
-                torques: Array(diceCount).fill({ x: 0, y: 0, z: 0 }),
-                lockedIndices: [],
-                rollerTag: myTag,
-                rollerPeerId: peerId!,
-                betAmount,
-                betMultiplier,
-            };
             set({ isRolling: false, diceResults: Array(diceCount).fill(null), rollEvent: resetRoll, lockedDice: [] });
             if (get().autoReroll) setTimeout(() => get().triggerLocalRoll(), 600);
             return;
@@ -595,10 +597,13 @@ export const useStore = create<GameState>((set, get) => ({
         // broadcast fault to all peers so they reset rolling state
         connections.forEach(c => c.send({ type: 'FAULT', peerId, tag: myTag }));
 
+        // multiplayer: also broadcast reset roll so dice return to board
+        connections.forEach(c => c.send({ type: 'ROLL', rollData: resetRoll }));
+
         // multiplayer session: submit 0-sum result and advance turn
         if (sessionActive) {
             const newRoundResults = [...roundResults, { peerId, tag: myTag, sum: 0, delta: 0 }];
-            set({ isRolling: false, diceResults: Array(diceCount).fill(null), rollEvent: null, lockedDice: [] });
+            set({ isRolling: false, diceResults: Array(diceCount).fill(null), rollEvent: resetRoll, lockedDice: [] });
 
             if (isHost) {
                 if (newRoundResults.length === turnOrder.length) {
@@ -616,6 +621,8 @@ export const useStore = create<GameState>((set, get) => ({
             } else {
                 connections.forEach(c => c.send({ type: 'ROUND_RESULT', peerId, tag: myTag, sum: 0, fault: true }));
             }
+        } else {
+            set({ isRolling: false, diceResults: Array(diceCount).fill(null), rollEvent: resetRoll, lockedDice: [] });
         }
     },
 

@@ -16,6 +16,8 @@ const FLOOR_Y = -9.0;
 
 // guard so one die falling doesn't fire fault multiple times per roll
 let faultFiredThisRoll = false;
+// track if we've already scheduled a delayed fault for this roll
+let faultScheduledThisRoll = false;
 
 // module-level rigid body registry — populated each frame, always current
 const rigidBodyRegistry = new Map<number, RapierRigidBody>();
@@ -247,14 +249,16 @@ export function Dice({ index, position, onFloorHit }: { index: number, position:
             }
         }
 
-        // out-of-bounds fault detection every frame
-        if (rolling && isRoller && rigidBodyRef.current && !faultFiredThisRoll) {
-            const { x: tx, y: ty, z: tz } = rigidBodyRef.current.translation();
-            if (ty < FLOOR_Y || Math.abs(tx) > 14 || Math.abs(tz) > 14) {
+        // Fallback: if dice falls far below ground plane (missed collision), trigger fault immediately
+        if (rolling && isRoller && rigidBodyRef.current && !faultFiredThisRoll && !faultScheduledThisRoll && onFloorHit) {
+            const { y: ty } = rigidBodyRef.current.translation();
+            if (ty < -15) { // well below ground plane at -9.85
                 faultFiredThisRoll = true;
-                onFloorHit?.();
+                onFloorHit();
             }
         }
+
+        // out-of-bounds fault detection removed — fault now triggers 2s after hitting floor plane
 
         // interpolate from jitter buffer at playback time
         if (!isRoller && rigidBodyRef.current) {
@@ -306,13 +310,13 @@ export function Dice({ index, position, onFloorHit }: { index: number, position:
         if (!rollEvent || !rigidBodyRef.current || isLocked) return;
         if (rollEvent.id === lastAppliedRollId.current) return;
         lastAppliedRollId.current = rollEvent.id;
-        if (index === 0) faultFiredThisRoll = false;
+        if (index === 0) {
+            faultFiredThisRoll = false;
+            faultScheduledThisRoll = false;
+        }
         const { peerId, diceCount } = useStore.getState();
         const isLocalRoll = rollEvent.rollerPeerId === peerId;
-        if (!isLocalRoll) return;
 
-        const impulse = rollEvent.impulses[index];
-        const torque = rollEvent.torques[index];
         const skipPositionReset = shared.fromDrag && isLocalRoll;
         if (!skipPositionReset) {
             const startPos = rollEvent.startPositions?.[index] ?? { x: posX, y: posY, z: posZ };
@@ -321,9 +325,12 @@ export function Dice({ index, position, onFloorHit }: { index: number, position:
             rigidBodyRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
         }
         if (index === diceCount - 1) shared.fromDrag = false;
-        rigidBodyRef.current.wakeUp();
-        rigidBodyRef.current.applyImpulse(impulse, true);
-        rigidBodyRef.current.applyTorqueImpulse(torque, true);
+
+        if (isLocalRoll) {
+            rigidBodyRef.current.wakeUp();
+            rigidBodyRef.current.applyImpulse(rollEvent.impulses[index], true);
+            rigidBodyRef.current.applyTorqueImpulse(rollEvent.torques[index], true);
+        }
     }, [rollEvent, index, posX, posY, posZ, isLocked]);
 
     // snap remote dice to the roller's final settled state
@@ -404,12 +411,18 @@ export function Dice({ index, position, onFloorHit }: { index: number, position:
         if (!rigidBodyRef.current) return;
 
         // fault detection: only the roller triggers faults
-        const { peerId, rollEvent: currentRollEvent } = useStore.getState();
-        if (currentRollEvent?.rollerPeerId === peerId) {
+        const { peerId, rollEvent: currentRollEvent, isRolling } = useStore.getState();
+        if (currentRollEvent?.rollerPeerId === peerId && isRolling) {
             const posY = rigidBodyRef.current.translation().y;
-            if (posY < FLOOR_Y && !faultFiredThisRoll && onFloorHit) {
-                faultFiredThisRoll = true;
-                onFloorHit();
+            
+            if (posY < -9.0 && !faultFiredThisRoll && !faultScheduledThisRoll && onFloorHit) {
+                faultScheduledThisRoll = true;
+                setTimeout(() => {
+                    if (!faultFiredThisRoll) {
+                        faultFiredThisRoll = true;
+                        onFloorHit();
+                    }
+                }, 2000);
             }
         }
 
