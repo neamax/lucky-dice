@@ -1,13 +1,8 @@
 # LuckyDice
 Open-source Single/Multiplayer Dice Game
 
-```
-Developed by
-Neama Kazemi
-at LuckyGene Indie Studio
-```
-#### Email: [neama@luckygene.site](mailto:neama@luckygene.site)
----
+> ### ➡️ [**Play Live Deployment**](https://dice.luckygene.site/)
+
 
 ## Features
 
@@ -30,3 +25,10 @@ at LuckyGene Indie Studio
 | State | Zustand |
 | Styling | Tailwind CSS v4 |
 | Build | Vite |
+
+> ---
+> *Developed by*
+> **Neama Kazemi**
+> at [LuckyGene Indie Studio](https://neama.luckygene.site/)
+> Email: [neama@luckygene.site](mailto:neama@luckygene.site)
+> ___
