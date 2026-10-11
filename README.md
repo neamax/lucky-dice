@@ -6,7 +6,7 @@ Developed by
 Neama Kazemi
 at LuckyGene Indie Studio
 ```
-#### Email: [neama@luckygene.net](mailto:neama@luckygene.net)
+#### Email: [neama@luckygene.site](mailto:neama@luckygene.site)
 ---
 
 ## Features
